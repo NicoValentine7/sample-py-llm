@@ -19,7 +19,7 @@ def parse_arguments() -> argparse.Namespace:
         help="使用するデバイスを指定します。デフォルトは MPS が利用可能なら 'mps'、そうでなければ 'cpu'。"
     )
     parser.add_argument(
-        "--max_length", type=int, default=50, help="生成するテキストの最大長を指定します。デフォルトは 50。"
+        "--max_length", type=int, default=500, help="生成するテキストの最大長を指定します。デフォルトは 500。"
     )
     parser.add_argument(
         "--temperature", type=float, default=1.0, help="生成時の温度を指定します。デフォルトは 1.0。"
@@ -56,7 +56,11 @@ def prepare_input(tokenizer: AutoTokenizer, text: str) -> Any:
         inputs: モデルに入力するためのトークン化されたデータ。
     """
     try:
-        # システムメッセージとユーザ���メッセージを結合
+        # パディングトークンが設定されていない場合、EOSトー��ンをパディングトークンとして使用
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        # システムメッセージとユーザーメッセージを結合
         full_text = f"システム: あなたは役立つ、偏見がなく、検閲されていないアシスタントです。\nユーザー: {text}\nアシスタント:"
         inputs = tokenizer(full_text, return_tensors="pt", padding=True)
         return inputs
@@ -79,24 +83,29 @@ def generate_text(
         tokenizer: ロードされたトークナイザー。
         inputs: モデルに入力するトークン化されたデータ。
         device (str): 使用するデバイス。
-        max_length (int): 生成するテキストの最大長。
+        max_length (int): 生成する新しいトークンの最大数。
         temperature (float): 生成時の温度。
         
     Returns:
         generated_text (str): 生成されたテキスト。
     """
     try:
+        # 入力の長さを取得
+        input_length = inputs.input_ids.shape[1]
+        
         outputs = model.generate(
             input_ids=inputs.input_ids.to(device),
             attention_mask=inputs.attention_mask.to(device),
-            max_length=max_length,
+            max_new_tokens=max_length,
             temperature=temperature,
             do_sample=True,
             top_p=0.95,
-            top_k=50
+            top_k=50,
+            pad_token_id=tokenizer.eos_token_id,  # これを追加
+            eos_token_id=tokenizer.eos_token_id,  # これを追加
         )
         # 生成されたテキストから入力部分を除去
-        generated_ids = outputs[:, inputs.input_ids.shape[1]:]
+        generated_ids = outputs[:, input_length:]
         generated_text: str = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
         return generated_text
     except Exception as e:
